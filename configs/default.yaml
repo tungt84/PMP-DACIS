@@ -1,0 +1,127 @@
+# PMP-DACIS Configuration
+# Disease-Aware Adaptive Pruning for Few-Shot Plant Pathology
+
+# ============================================
+# Dataset Configuration
+# ============================================
+dataset:
+  name: "plantvillage"  # plantvillage, plantdoc
+  root: "./data"
+  num_classes: 38
+  image_size: 224
+  split: "temporal"  # temporal, resolution, severity
+
+# ============================================
+# Model Configuration
+# ============================================
+model:
+  backbone: "resnet18"  # resnet18, mobilenetv2
+  pretrained: true
+  num_channels: 512  # Output channels of backbone
+
+# ============================================
+# Few-Shot Learning Configuration
+# ============================================
+fsl:
+  n_way: 5
+  k_shot: 5
+  n_query: 15
+  num_episodes: 60000
+  val_episodes: 600
+  test_episodes: 1000
+
+# ============================================
+# DACIS Configuration
+# ============================================
+dacis:
+  lambda_gradient: 0.3      # λ₁: Gradient norm weight
+  lambda_variance: 0.2      # λ₂: Feature variance weight
+  lambda_fisher: 0.5        # λ₃: Fisher discriminant weight
+  
+  # Layer-adaptive pruning
+  tau_base: 0.5             # Base pruning threshold
+  alpha: 0.5                # Layer depth factor
+  beta: 2.0                 # Task complexity sensitivity
+
+# ============================================
+# PMP Framework Configuration
+# ============================================
+pmp:
+  # Stage 1: Initial Pruning
+  stage1:
+    prune_ratio: 0.4        # 40% initial pruning
+    finetune_epochs: 5
+    
+  # Stage 2: Meta-Learning
+  stage2:
+    inner_lr: 0.01          # α: Inner loop learning rate
+    outer_lr: 0.001         # β: Outer loop learning rate
+    inner_steps: 5
+    meta_batch_size: 4
+    
+  # Stage 3: Refinement Pruning
+  stage3:
+    prune_ratio: 0.38       # Additional 38% pruning (total 78%)
+    gamma: 0.1              # Meta-gradient weight
+    finetune_epochs: 10
+
+# ============================================
+# Compression Configuration
+# ============================================
+compression:
+  target_ratio: 0.78        # Target parameter reduction
+  min_channels: 8           # Minimum channels per layer
+
+# ============================================
+# Training Configuration
+# ============================================
+training:
+  seed: 42
+  device: "cuda"
+  num_workers: 4
+  
+  # Loss weights
+  lambda_compress: 0.01
+  lambda_gen: 0.001
+  
+  # Optimizer
+  optimizer: "adam"
+  weight_decay: 1e-4
+  
+  # Scheduler
+  scheduler: "cosine"
+  warmup_epochs: 5
+
+# ============================================
+# Uncertainty Quantification
+# ============================================
+uncertainty:
+  mc_dropout: true
+  num_samples: 20           # T: MC dropout samples
+  threshold: 0.15           # τ_σ: Uncertainty threshold
+
+# ============================================
+# Evaluation Configuration
+# ============================================
+evaluation:
+  confidence_interval: 0.95
+  num_bootstrap: 1000
+
+# ============================================
+# Logging & Checkpointing
+# ============================================
+logging:
+  save_dir: "./checkpoints"
+  log_interval: 100
+  save_interval: 5000
+  tensorboard: true
+
+# ============================================
+# Hardware Configuration (Edge Deployment)
+# ============================================
+hardware:
+  target_device: "jetson_nano"  # raspberry_pi4, jetson_nano, edge_tpu
+  quantization: false
+  energy_model:
+    e_mac: 0.9              # pJ per MAC operation
+    e_mem: 5.0              # pJ per memory access
