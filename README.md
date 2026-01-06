@@ -1,36 +1,41 @@
+<div align="center">
+
 # PMP-DACIS: Disease-Aware Pruning for Few-Shot Plant Pathology
 
+[![arXiv](https://img.shields.io/badge/arXiv-2501.02353-b31b1b.svg)](https://arxiv.org/abs/2501.02353)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-1.9+-ee4c2c.svg)](https://pytorch.org/)
 
-> **78% parameter reduction** | **3.6× speedup** | **<2% accuracy drop** | **Edge-deployable**
+</div>
+
+> **78% parameter reduction** | **3.6x speedup** | **<2% accuracy drop** | **Edge-deployable**
 
 ---
 
-## 🌱 Overview
+## Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PMP-DACIS Framework                                  │
+│                         PMP-DACIS Framework                                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   📷 Input        🧠 DACIS Scoring       🔄 3-Stage PMP        📱 Edge      │
+│   Input           DACIS Scoring          3-Stage PMP           Edge         │
 │   ──────────────────────────────────────────────────────────────────────    │
 │                                                                             │
-│   [Leaf Image] ──► [Channel Analysis] ──► [Prune→Meta→Prune] ──► [Deploy]  │
-│                         │                        │                          │
-│                    ┌────┴────┐              ┌────┴────┐                     │
-│                    │ G + V + D│              │ 11.2M → │                     │
-│                    │ Scoring  │              │  2.5M   │                     │
-│                    └──────────┘              └─────────┘                     │
+│   [Leaf Image] ──► [Channel Analysis] ──► [Prune→Meta→Prune] ──► [Deploy]   │
+│                         │                         │                         │
+│                    ┌────┴─────┐              ┌────┴────┐                    │
+│                    │ G + V + D│              │ 11.2M → │                    │
+│                    │ Scoring  │              │  2.5M   │                    │
+│                    └──────────┘              └─────────┘                    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ### DACIS Scoring Pipeline
 
@@ -60,7 +65,7 @@
 │  11.2M → 6.7M   │     │  N-way K-shot   │     │  6.7M → 2.5M    │
 │   (40% prune)   │     │  60K episodes   │     │  (38% prune)    │
 │                 │     │                 │     │                 │
-│  DACIS scores   │     │  MAML inner/    │     │  DACIS × |Gₘₑₜₐ|│
+│  DACIS scores   │     │  MAML inner/    │     │  DACIS × |Gₘₑₜₐ| │
 │  on base data   │     │  outer loop     │     │  refined scores │
 │                 │     │                 │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
@@ -68,18 +73,18 @@
 
 ---
 
-## 📊 Results
+## Results
 
 | Method | Params | 1-shot | 5-shot | 10-shot | DES |
 |--------|--------|--------|--------|---------|-----|
 | ProtoNet (Full) | 100% | 71.2 | 84.6 | 89.3 | 0.42 |
 | Chan. Prune | 30% | 63.7 | 77.2 | 83.0 | 1.45 |
-| **Ours** | **30%** | **68.9** | **83.2** | **88.1** | **1.98** |
-| **Ours** | **22%** | 66.4 | 81.0 | 86.3 | **2.31** |
+| **PMP-DACIS** | **30%** | **68.9** | **83.2** | **88.1** | **1.98** |
+| **PMP-DACIS** | **22%** | 66.4 | 81.0 | 86.3 | **2.31** |
 
 ---
 
-## � Dataset
+## Dataset
 
 Download the PlantVillage dataset:
 
@@ -93,7 +98,7 @@ git clone https://github.com/spMohanty/PlantVillage-Dataset.git data/plantvillag
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Clone
@@ -115,7 +120,7 @@ python evaluate.py --model checkpoints/pmp_dacis.pth --device edge
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 pmp-dacis/
@@ -138,52 +143,64 @@ pmp-dacis/
 
 ---
 
-## 📈 Key Metrics
+## Key Metrics
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  DES = (Accuracy × FPS) / (Params × Energy)     ──► 4.7× ↑    │
-│  FSI = 1 - σ_acc / μ_acc                        ──► 0.91      │
-│  CSG = Acc_late / Acc_early                     ──► 0.83      │
+│  DES = (Accuracy × FPS) / (Params × Energy)     ──► 4.7× ↑     │
+│  FSI = 1 - σ_acc / μ_acc                        ──► 0.91       │
+│  CSG = Acc_late / Acc_early                     ──► 0.83       │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔧 Hardware
+## Hardware
 
 | Device | FPS | Energy (mJ) | Supported |
 |--------|-----|-------------|-----------|
-| Raspberry Pi 4 | 12 | 85 | ✅ |
-| Jetson Nano | 67 | 42 | ✅ |
-| Edge TPU | 120 | 18 | ✅ |
+| Raspberry Pi 4 | 12 | 85 | Yes |
+| Jetson Nano | 67 | 42 | Yes |
+| Edge TPU | 120 | 18 | Yes |
 
 ---
 
-## 📖 Citation
+## Citation
 
 ```bibtex
 @article{uddin2025pmp,
   title={Disease-Aware Adaptive Pruning for Few-Shot Plant Pathology: 
          A Progressive Meta-Learning Framework},
   author={Uddin, Mohammed Mudassir and Alam, Shahnawaz and Pasha, Mohammed Kaif},
-  journal={arXiv preprint},
+  journal={arXiv preprint arXiv:2501.02353},
   year={2025}
 }
 ```
 
 ---
 
-## 👥 Authors
+## Authors
 
-- **Mohammed Mudassir Uddin** - mohd.mudassiruddin7@gmail.com
-- **Shahnawaz Alam** - shahnawaz.alam1024@gmail.com
-- **Mohammed Kaif Pasha** - mdkaifpasha2k@gmail.com
+<div align="center">
+
+**Mohammed Mudassir Uddin** · **Shahnawaz Alam** · **Mohammed Kaif Pasha**
+
+[mohd.mudassiruddin7@gmail.com](mailto:mohd.mudassiruddin7@gmail.com) · [shahnawaz.alam1024@gmail.com](mailto:shahnawaz.alam1024@gmail.com) · [mdkaifpasha2k@gmail.com](mailto:mdkaifpasha2k@gmail.com)
 
 *Department of CSE, MJCET, Hyderabad, India*
 
+</div>
+
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+**[Paper](https://arxiv.org/abs/2501.02353)** · **[Issues](https://github.com/Mudassiruddin7/PMP-DACIS/issues)** · **[Star this repo](https://github.com/Mudassiruddin7/PMP-DACIS)**
+
+</div>
