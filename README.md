@@ -2,7 +2,7 @@
 
 # PMP-DACIS: Disease-Aware Pruning for Few-Shot Plant Pathology
 
-[![arXiv](https://img.shields.io/badge/arXiv-2501.02353-b31b1b.svg)](https://arxiv.org/abs/2501.02353)
+[![arXiv](https://img.shields.io/badge/arXiv-2601.02353-b31b1b.svg)](https://arxiv.org/abs/2601.02353)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-1.9+-ee4c2c.svg)](https://pytorch.org/)
@@ -169,13 +169,13 @@ pmp-dacis/
 
 ```bibtex
 @article{uddin2025pmp,
-  title={Disease-Aware Adaptive Pruning for Few-Shot Plant Pathology: 
-         A Progressive Meta-Learning Framework},
+  title={Meta-Learning Guided Pruning for Few-Shot Plant Pathology on Edge Devices},
   author={Uddin, Mohammed Mudassir and Alam, Shahnawaz and Pasha, Mohammed Kaif},
-  journal={arXiv preprint arXiv:2501.02353},
+  journal={arXiv preprint arXiv:2601.02353},
   year={2025}
 }
 ```
+
 
 ---
 
