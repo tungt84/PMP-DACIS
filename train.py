@@ -464,9 +464,13 @@ def run_pmp_training(
     # Create DACIS scorer
     dacis_config = config.get('dacis', {})
     scorer = DACSIScorer(
-        lambda_g=dacis_config.get('lambda_g', 0.3),
-        lambda_v=dacis_config.get('lambda_v', 0.2),
-        lambda_d=dacis_config.get('lambda_d', 0.5)
+        #lambda_g=dacis_config.get('lambda_g', 0.3),
+        #lambda_v=dacis_config.get('lambda_v', 0.2),
+        #lambda_d=dacis_config.get('lambda_d', 0.5)
+        lambda_gradient=dacis_config.get('lambda_g', 0.3),
+        lambda_variance=dacis_config.get('lambda_v', 0.2),
+        lambda_fisher=dacis_config.get('lambda_d', 0.5),
+        device=device
     )
     
     # Create data loaders
