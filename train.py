@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import random
+import traceback
 import numpy as np
 import torch
 import torch.nn as nn
@@ -256,7 +257,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         val_dataset = HFPlantVillageDataset(val_split, image_size=image_size)
         test_dataset = HFPlantVillageDataset(test_split, image_size=image_size)
     except Exception as e:
-        logging.warning(f"Error occurred: {e}")
+        logging.warning(f"Error occurred: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
         logging.warning("Using dummy dataset - replace with real data for actual training")
         num_classes = dataset_config.get('num_classes', 38)
         train_dataset = DummyDataset(num_classes=num_classes, samples_per_class=100)
