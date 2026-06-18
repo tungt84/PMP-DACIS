@@ -371,14 +371,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         train_dataset = HFPlantVillageDataset(train_split, image_size=image_size)
         val_dataset = HFPlantVillageDataset(val_split, image_size=image_size)
         test_dataset = HFPlantVillageDataset(test_split, image_size=image_size)
-        # sau khi tạo train_dataset = HFPlantVillageDataset(train_split, ...)
-        if getattr(train_dataset, 'label_names', None) is not None:
-            num_classes = len(train_dataset.label_names)
-        elif getattr(train_dataset, 'label_to_idx', None) is not None:
-            num_classes = len(train_dataset.label_to_idx)
-        else:
-            # fallback (thử lấy unique từ HF split)
-            num_classes = len(train_dataset.ds.unique(train_dataset.label_field))
+        num_classes = dataset_config.get('num_classes', 38)
     except Exception as e:
         logging.warning(f"Error occurred: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
         logging.warning("Using dummy dataset - replace with real data for actual training")
