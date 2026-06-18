@@ -311,7 +311,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         dataset_config['num_classes'] = getattr(train_dataset, 'num_classes', dataset_config.get('num_classes', 38))
 
     except Exception as e:
-        logging.warning(f"HF dataset load failed: {e}")
+        logging.warning(f"HF dataset load failed: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
         logging.warning("Falling back to dummy datasets")
         num_classes = dataset_config.get('num_classes', 38)
         train_dataset = DummyDataset(num_classes=num_classes, samples_per_class=100)
