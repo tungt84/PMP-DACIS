@@ -206,22 +206,113 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
     dataset_config = config.get('dataset', {})
     fsl_config = config.get('fsl', {})
     
-    # Try to load real dataset, fall back to dummy
+    # Load PlantVillage from HuggingFace Datasets (simple implementation)
     from datasets import load_dataset, ClassLabel
     from torchvision import transforms
     from PIL import Image
+    import io
+    import numpy as np
 
-    
+    logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
     try:
-        # Placeholder for real dataset loading
-        #from torchvision.datasets import ImageFolder
-        #train_dataset = ImageFolder(dataset_config['train_path'], transform=...)
-        #raise NotImplementedError("Use dummy dataset for demo")
-        logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
-        
+        # User requested the config name exactly as 'defualt' (note the spelling).
+        # If that fails, try the common 'color' config as a fallback.
+        try:
+            hf = load_dataset("mohanty/PlantVillage", "defualt")
+        except Exception:
+            hf = load_dataset("mohanty/PlantVillage", "color")
+
+        # Select splits
+        if 'train' in hf:
+            hf_train = hf['train']
+        else:
+            hf_train = hf[list(hf.keys())[0]]
+
+        if 'validation' in hf:
+            hf_val = hf['validation']
+        elif 'test' in hf:
+            hf_val = hf['test']
+        else:
+            split = hf_train.train_test_split(test_size=0.2)
+            hf_train = split['train']
+            hf_val = split['test']
+
+        # Basic transforms
+        image_size = dataset_config.get('image_size', 224)
+        tfm = transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor()
+        ])
+
+        class SimpleHFDataset(Dataset):
+            def __init__(self, hf_dataset, transform=None):
+                self.ds = hf_dataset
+                self.transform = transform or tfm
+                # infer num classes if possible
+                lf = getattr(hf_dataset, 'features', {}).get('label', None)
+                if isinstance(lf, ClassLabel):
+                    self.num_classes = lf.num_classes
+                else:
+                    # scan a subset to infer unique labels
+                    sample_n = min(1000, len(hf_dataset))
+                    labs = [hf_dataset[i]['label'] for i in range(sample_n)]
+                    if len(labs) == 0:
+                        self.num_classes = dataset_config.get('num_classes', 38)
+                    else:
+                        uniq = sorted(list({l for l in labs}))
+                        if isinstance(uniq[0], int):
+                            self.num_classes = int(max(uniq) + 1)
+                        else:
+                            self.label_map = {v: i for i, v in enumerate(uniq)}
+                            self.num_classes = len(uniq)
+
+            def __len__(self):
+                return len(self.ds)
+
+            def __getitem__(self, idx):
+                item = self.ds[idx]
+                # Expect 'image' and 'label' keys
+                img = item.get('image', None)
+                if img is None:
+                    # try to find an image-like field
+                    for k, v in item.items():
+                        if k == 'label':
+                            continue
+                        if isinstance(v, (bytes, bytearray)) or isinstance(v, np.ndarray) or getattr(v, 'mode', None) is not None:
+                            img = v
+                            break
+
+                if isinstance(img, bytes):
+                    image = Image.open(io.BytesIO(img)).convert('RGB')
+                elif isinstance(img, np.ndarray):
+                    image = Image.fromarray(img).convert('RGB')
+                elif isinstance(img, Image.Image):
+                    image = img.convert('RGB')
+                elif isinstance(img, str):
+                    image = Image.open(img).convert('RGB')
+                else:
+                    raise KeyError('no image field found in dataset item')
+
+                image = self.transform(image)
+
+                label = item.get('label')
+                if hasattr(self, 'label_map') and isinstance(label, str):
+                    label = self.label_map[label]
+                elif isinstance(label, ClassLabel):
+                    label = int(label)
+                return image, int(label)
+
+        train_dataset = SimpleHFDataset(hf_train, transform=tfm)
+        val_dataset = SimpleHFDataset(hf_val, transform=tfm)
+        # For test use validation split if present
+        test_dataset = val_dataset
+
+        # Update config num_classes
+        dataset_config['num_classes'] = getattr(train_dataset, 'num_classes', dataset_config.get('num_classes', 38))
+
     except Exception as e:
-        logging.warning(f"Error occurred: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
-        logging.warning("Using dummy dataset - replace with real data for actual training")
+        logging.warning(f"HF dataset load failed: {e}")
+        logging.warning("Falling back to dummy datasets")
         num_classes = dataset_config.get('num_classes', 38)
         train_dataset = DummyDataset(num_classes=num_classes, samples_per_class=100)
         val_dataset = DummyDataset(num_classes=num_classes, samples_per_class=20)
