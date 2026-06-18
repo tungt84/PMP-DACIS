@@ -217,12 +217,13 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
     try:
         # User requested the config name exactly as 'default' (note the spelling).
         # If that fails, try the common 'color' config as a fallback.
+        # Prefer the 'color' config which contains image fields.
+        # Some configs (like the default/text-only one) return a 'text' field
+        # pointing to image paths instead of an 'image' PIL object.
         try:
-            hf = load_dataset("mohanty/PlantVillage", "default")
-        except Exception:
             hf = load_dataset("mohanty/PlantVillage", "color")
-        print(hf)
-        print(hf['train'][0])
+        except Exception:
+            hf = load_dataset("mohanty/PlantVillage", "default")
         # Select splits
         if 'train' in hf:
             hf_train = hf['train']
@@ -319,11 +320,16 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
                 # Expect 'image' and label under detected key
                 img = item.get('image', None)
                 if img is None:
-                    # try to find an image-like field
+                    # try to find an image-like field or a text path
                     for k, v in item.items():
-                        if k == 'label':
+                        if k == self.label_key:
                             continue
+                        # direct image bytes/arrays or PIL Image
                         if isinstance(v, (bytes, bytearray)) or isinstance(v, np.ndarray) or getattr(v, 'mode', None) is not None:
+                            img = v
+                            break
+                        # some HF configs store a path under 'text'
+                        if isinstance(v, str) and v.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff')):
                             img = v
                             break
 
@@ -334,7 +340,12 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
                 elif isinstance(img, Image.Image):
                     image = img.convert('RGB')
                 elif isinstance(img, str):
-                    image = Image.open(img).convert('RGB')
+                    # img may be a path (absolute or relative). Try to open directly.
+                    try:
+                        image = Image.open(img).convert('RGB')
+                    except Exception:
+                        # If opening fails, raise to let caller know
+                        raise
                 else:
                     raise KeyError('no image field found in dataset item')
 
