@@ -236,7 +236,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         #train_dataset = ImageFolder(dataset_config['train_path'], transform=...)
         #raise NotImplementedError("Use dummy dataset for demo")
         logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
-        hf = load_dataset(dataset_config['root']+'/plantvillage', "color")
+        hf = load_dataset("mohanty/PlantVillage", "color")
         # Create splits if dataset doesn't include val/test
         if 'train' in hf and ('validation' in hf or 'test' in hf):
             train_split = hf['train']
