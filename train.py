@@ -215,10 +215,10 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
 
     logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
     try:
-        # User requested the config name exactly as 'defualt' (note the spelling).
+        # User requested the config name exactly as 'default' (note the spelling).
         # If that fails, try the common 'color' config as a fallback.
         try:
-            hf = load_dataset("mohanty/PlantVillage", "defualt")
+            hf = load_dataset("mohanty/PlantVillage", "default")
         except Exception:
             hf = load_dataset("mohanty/PlantVillage", "color")
 
