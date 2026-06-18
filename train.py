@@ -379,7 +379,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
         # use the 'color' configuration (original RGB images)
         try:
-            hf = load_dataset("mohanty/PlantVillage", "color")
+            hf = load_dataset("mohanty/PlantVillage", "default")
         except Exception:
             # fallback to default if 'color' not available
             hf = load_dataset("mohanty/PlantVillage")
