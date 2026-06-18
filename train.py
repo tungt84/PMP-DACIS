@@ -206,11 +206,55 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
     fsl_config = config.get('fsl', {})
     
     # Try to load real dataset, fall back to dummy
+    from datasets import load_dataset
+    from torchvision import transforms
+    from PIL import Image
+
+    class HFPlantVillageDataset(Dataset):
+        def __init__(self, hf_split, image_size=224, transform=None):
+            self.ds = hf_split
+            self.transform = transform or transforms.Compose([
+                transforms.Resize((image_size, image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+            ])
+        def __len__(self):
+            return len(self.ds)
+        def __getitem__(self, idx):
+            item = self.ds[idx]
+            # hf dataset stores images under 'image' as PIL Image or numpy array
+            img = item['image']
+            if not isinstance(img, Image.Image):
+                img = Image.fromarray(img)
+            img = self.transform(img)
+            # label may be int; if it's string use mapping: item['labels'] or item['label']
+            label = item.get('label') or item.get('labels') or item.get('label_id')
+            return img, int(label)
     try:
         # Placeholder for real dataset loading
-        # from torchvision.datasets import ImageFolder
-        # train_dataset = ImageFolder(dataset_config['train_path'], transform=...)
-        raise NotImplementedError("Use dummy dataset for demo")
+        #from torchvision.datasets import ImageFolder
+        #train_dataset = ImageFolder(dataset_config['train_path'], transform=...)
+        #raise NotImplementedError("Use dummy dataset for demo")
+        logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
+        hf = load_dataset("mohanty/PlantVillage", "color")
+        # Create splits if dataset doesn't include val/test
+        if 'train' in hf and ('validation' in hf or 'test' in hf):
+            train_split = hf['train']
+            val_split = hf.get('validation', hf.get('test')).train_test_split(test_size=0.1)['test']
+            test_split = hf.get('test', val_split)
+        else:
+            # fallback: single split -> manual split
+            full = hf['train']
+            split = full.train_test_split(test_size=0.2, seed=42)
+            train_split = split['train']
+            rest = split['test'].train_test_split(test_size=0.5, seed=42)
+            val_split = rest['train']
+            test_split = rest['test']
+
+        image_size = dataset_config.get('image_size', 224)
+        train_dataset = HFPlantVillageDataset(train_split, image_size=image_size)
+        val_dataset = HFPlantVillageDataset(val_split, image_size=image_size)
+        test_dataset = HFPlantVillageDataset(test_split, image_size=image_size)
     except:
         logging.warning("Using dummy dataset - replace with real data for actual training")
         num_classes = dataset_config.get('num_classes', 38)
