@@ -221,7 +221,8 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
             hf = load_dataset("mohanty/PlantVillage", "default")
         except Exception:
             hf = load_dataset("mohanty/PlantVillage", "color")
-
+        print(hf)
+        print(hf['train'][0])
         # Select splits
         if 'train' in hf:
             hf_train = hf['train']
