@@ -446,11 +446,18 @@ def run_pmp_training(
     
     logger.info(f"Creating PMP model with backbone: {backbone_name}")
     
+ 
+    pmp_model_config = {
+         "model" : {"backbone": backbone_name,"num_channels": model_config.get('feature_dim', 512)},
+         "training": {"device": device},
+         "fsl": {"n_way": config['fsl']['n_way'], "k_shot": config['fsl']['k_shot']}
+    }
     model = create_pmp_model(
-        backbone_name=backbone_name,
-        feature_dim=model_config.get('feature_dim', 512),
-        num_classes=config['dataset'].get('num_classes', 38),
-        n_way=config['fsl'].get('n_way', 5)
+        config=pmp_model_config
+        #backbone_name=backbone_name,
+        #feature_dim=model_config.get('feature_dim', 512),
+        #num_classes=config['dataset'].get('num_classes', 38),
+        #n_way=config['fsl'].get('n_way', 5)
     )
     model = model.to(device)
     
