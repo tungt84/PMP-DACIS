@@ -248,14 +248,58 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
             def __init__(self, hf_dataset, transform=None):
                 self.ds = hf_dataset
                 self.transform = transform or tfm
-                # infer num classes if possible
-                lf = getattr(hf_dataset, 'features', {}).get('label', None)
+                # Detect label field name and infer num classes
+                features = getattr(hf_dataset, 'features', {}) or {}
+                self.label_key = None
+                # Prefer schema-declared ClassLabel
+                for k, v in features.items():
+                    if isinstance(v, ClassLabel):
+                        self.label_key = k
+                        break
+
+                # If not found, probe a small sample of items to find a label-like key
+                if self.label_key is None:
+                    sample_n = min(1000, len(hf_dataset))
+                    candidates = set()
+                    for i in range(sample_n):
+                        item = hf_dataset[i]
+                        for k, v in item.items():
+                            if k == 'image':
+                                continue
+                            if isinstance(v, (int, np.integer)) or isinstance(v, str):
+                                candidates.add(k)
+                        if candidates:
+                            break
+
+                    # pick best candidate by name priority
+                    if candidates:
+                        priority = ['label', 'labels', 'class', 'classes', 'leaf', 'category', 'target']
+                        chosen = None
+                        for p in priority:
+                            for c in candidates:
+                                if p in c.lower():
+                                    chosen = c
+                                    break
+                            if chosen:
+                                break
+                        self.label_key = chosen or sorted(candidates)[0]
+
+                # Fallback
+                if self.label_key is None:
+                    self.label_key = 'label'
+
+                # infer num_classes if possible
+                lf = features.get(self.label_key, None)
                 if isinstance(lf, ClassLabel):
                     self.num_classes = lf.num_classes
                 else:
-                    # scan a subset to infer unique labels
+                    # gather unique labels from a small sample
                     sample_n = min(1000, len(hf_dataset))
-                    labs = [hf_dataset[i]['label'] for i in range(sample_n)]
+                    labs = []
+                    for i in range(sample_n):
+                        item = hf_dataset[i]
+                        if self.label_key in item:
+                            labs.append(item[self.label_key])
                     if len(labs) == 0:
                         self.num_classes = dataset_config.get('num_classes', 38)
                     else:
@@ -271,7 +315,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
 
             def __getitem__(self, idx):
                 item = self.ds[idx]
-                # Expect 'image' and 'label' keys
+                # Expect 'image' and label under detected key
                 img = item.get('image', None)
                 if img is None:
                     # try to find an image-like field
@@ -295,11 +339,22 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
 
                 image = self.transform(image)
 
-                label = item.get('label')
+                # Resolve label via detected key
+                label = item.get(self.label_key)
+                if label is None:
+                    # attempt to find any non-image field that looks like a label
+                    for k, v in item.items():
+                        if k == 'image':
+                            continue
+                        if isinstance(v, (int, np.integer)) or isinstance(v, str):
+                            label = v
+                            break
+
                 if hasattr(self, 'label_map') and isinstance(label, str):
                     label = self.label_map[label]
                 elif isinstance(label, ClassLabel):
                     label = int(label)
+
                 return image, int(label)
 
         train_dataset = SimpleHFDataset(hf_train, transform=tfm)
