@@ -207,30 +207,145 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
     fsl_config = config.get('fsl', {})
     
     # Try to load real dataset, fall back to dummy
-    from datasets import load_dataset
+    from datasets import load_dataset, ClassLabel
     from torchvision import transforms
     from PIL import Image
 
     class HFPlantVillageDataset(Dataset):
+        """Wrapper for HuggingFace PlantVillage splits with flexible field detection.
+
+        Detects common image and label keys (e.g. 'image', 'img', 'label', 'labels')
+        and builds a label->index mapping when labels are strings.
+        """
+
         def __init__(self, hf_split, image_size=224, transform=None):
             self.ds = hf_split
             self.transform = transform or transforms.Compose([
                 transforms.Resize((image_size, image_size)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
+
+            # Inspect a sample to find image and label fields
+            sample = None
+            try:
+                sample = self.ds[0]
+            except Exception:
+                sample = None
+
+            self.image_field = None
+            self.label_field = None
+            self.is_classlabel = False
+            self.label_to_idx = None
+
+            if isinstance(sample, dict):
+                # Common image keys
+                for k in ['image', 'img', 'pixels', 'pixel_values', 'image_path', 'image_file']:
+                    if k in sample:
+                        self.image_field = k
+                        break
+
+                # Common label keys
+                for k in ['label', 'labels', 'label_id', 'class', 'target']:
+                    if k in sample:
+                        self.label_field = k
+                        break
+
+            # Fallback: try dataset features for ClassLabel
+            try:
+                feats = getattr(self.ds, 'features', None)
+                if feats is not None and 'label' in feats and isinstance(feats['label'], ClassLabel):
+                    self.is_classlabel = True
+                    self.label_field = 'label'
+                    self.label_names = feats['label'].names
+                    self.label_to_idx = {n: i for i, n in enumerate(self.label_names)}
+            except Exception:
+                pass
+
+            # If image field still unknown, try to infer first dict value that's an image
+            if self.image_field is None and isinstance(sample, dict):
+                for k, v in sample.items():
+                    if isinstance(v, (bytes, bytearray)):
+                        # skip raw bytes
+                        continue
+                    try:
+                        if isinstance(v, Image.Image) or (hasattr(v, 'shape') and len(getattr(v, 'shape', [])) >= 2):
+                            self.image_field = k
+                            break
+                    except Exception:
+                        continue
+
+            # If label field is string-valued, build mapping from unique values
+            if self.label_field is None and isinstance(sample, dict):
+                # try to locate a likely label field
+                for k, v in sample.items():
+                    if isinstance(v, (int, float, str)):
+                        # prefer keys named like label/class
+                        if 'label' in k or 'class' in k or 'target' in k:
+                            self.label_field = k
+                            break
+
+            if self.label_field is not None and not self.is_classlabel:
+                # attempt to build mapping if labels are strings
+                try:
+                    unique_vals = self.ds.unique(self.label_field)
+                    if all(isinstance(x, str) for x in unique_vals):
+                        self.label_names = sorted(unique_vals)
+                        self.label_to_idx = {n: i for i, n in enumerate(self.label_names)}
+                except Exception:
+                    self.label_to_idx = None
+
         def __len__(self):
             return len(self.ds)
+
         def __getitem__(self, idx):
             item = self.ds[idx]
-            # hf dataset stores images under 'image' as PIL Image or numpy array
-            img = item['image']
+
+            # Resolve image
+            if self.image_field and self.image_field in item:
+                img = item[self.image_field]
+            else:
+                # pick first plausible image value
+                img = None
+                if isinstance(item, dict):
+                    for v in item.values():
+                        if isinstance(v, Image.Image) or (hasattr(v, 'shape') and len(getattr(v, 'shape', [])) >= 2):
+                            img = v
+                            break
+                if img is None:
+                    raise KeyError('no image field found in dataset item')
+
             if not isinstance(img, Image.Image):
-                img = Image.fromarray(img)
+                try:
+                    img = Image.fromarray(img)
+                except Exception:
+                    # If bytes path, attempt to open
+                    raise
+
             img = self.transform(img)
-            # label may be int; if it's string use mapping: item['labels'] or item['label']
-            label = item.get('label') or item.get('labels') or item.get('label_id')
-            return img, int(label)
+
+            # Resolve label
+            raw_label = None
+            if self.label_field and self.label_field in item:
+                raw_label = item[self.label_field]
+            else:
+                # try common keys
+                for k in ['label', 'labels', 'label_id', 'class', 'target']:
+                    if isinstance(item, dict) and k in item:
+                        raw_label = item[k]
+                        break
+
+            if raw_label is None:
+                raise KeyError('no label field found in dataset item')
+
+            if self.is_classlabel:
+                label = int(raw_label)
+            elif self.label_to_idx is not None:
+                label = int(self.label_to_idx[str(raw_label)])
+            else:
+                label = int(raw_label)
+
+            return img, label
     try:
         # Placeholder for real dataset loading
         #from torchvision.datasets import ImageFolder
@@ -256,6 +371,14 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         train_dataset = HFPlantVillageDataset(train_split, image_size=image_size)
         val_dataset = HFPlantVillageDataset(val_split, image_size=image_size)
         test_dataset = HFPlantVillageDataset(test_split, image_size=image_size)
+        # sau khi tạo train_dataset = HFPlantVillageDataset(train_split, ...)
+        if getattr(train_dataset, 'label_names', None) is not None:
+            num_classes = len(train_dataset.label_names)
+        elif getattr(train_dataset, 'label_to_idx', None) is not None:
+            num_classes = len(train_dataset.label_to_idx)
+        else:
+            # fallback (thử lấy unique từ HF split)
+            num_classes = len(train_dataset.ds.unique(train_dataset.label_field))
     except Exception as e:
         logging.warning(f"Error occurred: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
         logging.warning("Using dummy dataset - replace with real data for actual training")
