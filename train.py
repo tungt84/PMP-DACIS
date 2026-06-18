@@ -238,14 +238,26 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
             self.is_classlabel = False
             self.label_to_idx = None
 
-            if isinstance(sample, dict):
-                # Common image keys
+            # Prefer feature metadata when available
+            try:
+                feats = getattr(self.ds, 'features', None)
+                if feats is not None:
+                    if 'image' in feats:
+                        self.image_field = 'image'
+                    if 'label' in feats:
+                        self.label_field = 'label'
+            except Exception:
+                pass
+
+            # If not found via features, inspect sample keys/mapping
+            from collections.abc import Mapping
+            if self.image_field is None and isinstance(sample, Mapping):
                 for k in ['image', 'img', 'pixels', 'pixel_values', 'image_path', 'image_file']:
                     if k in sample:
                         self.image_field = k
                         break
 
-                # Common label keys
+            if self.label_field is None and isinstance(sample, Mapping):
                 for k in ['label', 'labels', 'label_id', 'class', 'target']:
                     if k in sample:
                         self.label_field = k
@@ -262,8 +274,9 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
             except Exception:
                 pass
 
-            # If image field still unknown, try to infer first dict value that's an image
-            if self.image_field is None and isinstance(sample, dict):
+            # If image field still unknown, try to infer first mapping value that's an image
+            from collections.abc import Mapping
+            if self.image_field is None and isinstance(sample, Mapping):
                 for k, v in sample.items():
                     if isinstance(v, (bytes, bytearray)):
                         # skip raw bytes
@@ -276,7 +289,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
                         continue
 
             # If label field is string-valued, build mapping from unique values
-            if self.label_field is None and isinstance(sample, dict):
+            if self.label_field is None and isinstance(sample, Mapping):
                 # try to locate a likely label field
                 for k, v in sample.items():
                     if isinstance(v, (int, float, str)):
@@ -317,10 +330,22 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
 
             if not isinstance(img, Image.Image):
                 try:
+                    # numpy array
                     img = Image.fromarray(img)
                 except Exception:
-                    # If bytes path, attempt to open
-                    raise
+                    # bytes or path
+                    try:
+                        import io
+                        if isinstance(img, (bytes, bytearray)):
+                            img = Image.open(io.BytesIO(img)).convert('RGB')
+                        elif isinstance(img, str):
+                            img = Image.open(img).convert('RGB')
+                        elif isinstance(img, dict) and 'path' in img:
+                            img = Image.open(img['path']).convert('RGB')
+                        else:
+                            raise
+                    except Exception:
+                        raise KeyError('unable to decode image field')
 
             img = self.transform(img)
 
@@ -352,7 +377,12 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         #train_dataset = ImageFolder(dataset_config['train_path'], transform=...)
         #raise NotImplementedError("Use dummy dataset for demo")
         logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
-        hf = load_dataset("mohanty/PlantVillage","default")
+        # use the 'color' configuration (original RGB images)
+        try:
+            hf = load_dataset("mohanty/PlantVillage", "color")
+        except Exception:
+            # fallback to default if 'color' not available
+            hf = load_dataset("mohanty/PlantVillage")
         # Create splits if dataset doesn't include val/test
         if 'train' in hf and ('validation' in hf or 'test' in hf):
             train_split = hf['train']
@@ -371,6 +401,31 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         train_dataset = HFPlantVillageDataset(train_split, image_size=image_size)
         val_dataset = HFPlantVillageDataset(val_split, image_size=image_size)
         test_dataset = HFPlantVillageDataset(test_split, image_size=image_size)
+        # Determine number of classes and store in config if possible
+        num_classes = None
+        try:
+            if hasattr(train_dataset, 'label_names') and train_dataset.label_names is not None:
+                num_classes = len(train_dataset.label_names)
+            elif hasattr(train_dataset, 'label_to_idx') and train_dataset.label_to_idx is not None:
+                num_classes = len(train_dataset.label_to_idx)
+            else:
+                # Try HF features
+                feat = getattr(train_split, 'features', None)
+                if feat is not None and 'label' in feat:
+                    lab = feat['label']
+                    from datasets import ClassLabel
+                    if isinstance(lab, ClassLabel):
+                        num_classes = lab.num_classes
+                    else:
+                        try:
+                            num_classes = len(train_split.unique('label'))
+                        except Exception:
+                            num_classes = None
+        except Exception:
+            num_classes = None
+
+        if num_classes is not None:
+            dataset_config['num_classes'] = int(num_classes)
         num_classes = dataset_config.get('num_classes', 38)
     except Exception as e:
         logging.warning(f"Error occurred: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
