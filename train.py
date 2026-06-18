@@ -220,10 +220,11 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         # Prefer the 'color' config which contains image fields.
         # Some configs (like the default/text-only one) return a 'text' field
         # pointing to image paths instead of an 'image' PIL object.
-        try:
-            hf = load_dataset("mohanty/PlantVillage", "color")
-        except Exception:
-            hf = load_dataset("mohanty/PlantVillage", "default")
+    
+        hf = load_dataset("mohanty/PlantVillage", "color")
+        print(hf)
+        print(hf['train'][0])
+     
         # Select splits
         if 'train' in hf:
             hf_train = hf['train']
