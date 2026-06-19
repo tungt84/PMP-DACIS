@@ -480,7 +480,8 @@ def train_epoch(
         # Forward pass
         optimizer.zero_grad()
         
-        logits = model.forward_episode(support_x, support_y, query_x)
+        # PMPFramework.forward expects (support_images, query_images, support_labels, mode)
+        logits = model.forward(support_x, query_x, support_y, mode='proto')
         loss = nn.functional.cross_entropy(logits, query_y)
         
         # Backward pass
@@ -565,7 +566,7 @@ def evaluate(
         query_x = query_x.to(device, non_blocking=non_block)
         query_y = query_y.to(device, non_blocking=non_block)
         
-        logits = model.forward_episode(support_x, support_y, query_x)
+        logits = model.forward(support_x, query_x, support_y, mode='proto')
         predictions = logits.argmax(dim=-1)
 
         correct = (predictions == query_y).sum().item()
@@ -694,7 +695,8 @@ def run_pmp_training(
     
     # Get sample batch for DACIS scoring
     sample_batch = next(iter(train_loader))
-    support_x, support_y, query_x, query_y = [t.to(device) for t in sample_batch]
+    non_block = config.get('training', {}).get('pin_memory', False) and str(device).startswith('cuda')
+    support_x, support_y, query_x, query_y = [t.to(device, non_blocking=non_block) for t in sample_batch]
     
     # Compute DACIS scores (simplified - use backbone features)
     backbone = model.backbone
