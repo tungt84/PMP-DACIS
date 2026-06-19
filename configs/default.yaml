@@ -10,6 +10,8 @@ dataset:
   num_classes: 38
   image_size: 224
   split: "temporal"  # temporal, resolution, severity
+  config: "color"
+  use_local_loader: true
 
 # ============================================
 # Model Configuration
@@ -80,7 +82,8 @@ compression:
 training:
   seed: 42
   device: "cuda"
-  num_workers: 2
+  num_workers: 1
+  pin_memory: true
   
   # Loss weights
   lambda_compress: 0.01
@@ -108,6 +111,11 @@ uncertainty:
 evaluation:
   confidence_interval: 0.95
   num_bootstrap: 1000
+
+# Streaming options to avoid materializing episodes in RAM
+streaming:
+  use_iterable_episodes: true
+  val_fraction_from_train: 0.1  # fraction of leaf groups to holdout as val
 
 # ============================================
 # Logging & Checkpointing

@@ -21,7 +21,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 from torch.utils.tensorboard import SummaryWriter
 import yaml
 from pathlib import Path
@@ -299,59 +299,127 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
         val_dataset = DummyDataset(num_classes=num_classes, samples_per_class=20)
         test_dataset = DummyDataset(num_classes=num_classes, samples_per_class=20)
     
-    # Create episode samplers
+    # Create episode samplers (optionally streaming via IterableDataset)
     n_way = fsl_config.get('n_way', 5)
     k_shot = fsl_config.get('k_shot', 5)
     q_query = fsl_config.get('q_query', 15)
-    
-    train_sampler = EpisodeSampler(
-        train_dataset,
-        n_way=n_way,
-        k_shot=k_shot,
-        q_query=q_query,
-        num_episodes=fsl_config.get('train_episodes', 10000)
-    )
-    
-    val_sampler = EpisodeSampler(
-        val_dataset,
-        n_way=n_way,
-        k_shot=k_shot,
-        q_query=q_query,
-        num_episodes=fsl_config.get('val_episodes', 1000)
-    )
-    
-    test_sampler = EpisodeSampler(
-        test_dataset,
-        n_way=n_way,
-        k_shot=k_shot,
-        q_query=q_query,
-        num_episodes=fsl_config.get('test_episodes', 2000)
-    )
+
+    use_iterable = config.get('streaming', {}).get('use_iterable_episodes', False)
+
+    if use_iterable:
+        class EpisodeIterableDataset(IterableDataset):
+            def __init__(self, dataset, n_way, k_shot, q_query, num_episodes):
+                super().__init__()
+                self.dataset = dataset
+                self.n_way = n_way
+                self.k_shot = k_shot
+                self.q_query = q_query
+                self.num_episodes = num_episodes
+
+                # build class indices efficiently
+                self.class_indices = defaultdict(list)
+                if hasattr(dataset, 'examples'):
+                    for idx, ex in enumerate(dataset.examples):
+                        lbl = dataset.class_to_idx.get(ex['label'], 0) if hasattr(dataset, 'class_to_idx') else 0
+                        self.class_indices[lbl].append(idx)
+                elif hasattr(dataset, 'labels'):
+                    for idx, lbl in enumerate(dataset.labels):
+                        self.class_indices[lbl].append(idx)
+                else:
+                    for idx in range(len(dataset)):
+                        _, lbl = dataset[idx]
+                        self.class_indices[lbl].append(idx)
+
+                self.classes = list(self.class_indices.keys())
+
+            def __iter__(self):
+                rng = random.Random()
+                for _ in range(self.num_episodes):
+                    episode_classes = rng.sample(self.classes, self.n_way)
+                    support_images = []
+                    support_labels = []
+                    query_images = []
+                    query_labels = []
+
+                    for new_label, cls in enumerate(episode_classes):
+                        indices = rng.sample(self.class_indices[cls], min(self.k_shot + self.q_query, len(self.class_indices[cls])))
+                        support_indices = indices[:self.k_shot]
+                        query_indices = indices[self.k_shot:self.k_shot + self.q_query]
+                        for idx in support_indices:
+                            img, _ = self.dataset[idx]
+                            support_images.append(img)
+                            support_labels.append(new_label)
+                        for idx in query_indices:
+                            img, _ = self.dataset[idx]
+                            query_images.append(img)
+                            query_labels.append(new_label)
+
+                    support_x = torch.stack(support_images)
+                    support_y = torch.tensor(support_labels, dtype=torch.long)
+                    query_x = torch.stack(query_images)
+                    query_y = torch.tensor(query_labels, dtype=torch.long)
+                    yield support_x, support_y, query_x, query_y
+
+        train_sampler = EpisodeIterableDataset(train_dataset, n_way, k_shot, q_query, fsl_config.get('train_episodes', 10000))
+        val_sampler = EpisodeIterableDataset(val_dataset, n_way, k_shot, q_query, fsl_config.get('val_episodes', 1000))
+        test_sampler = EpisodeIterableDataset(test_dataset, n_way, k_shot, q_query, fsl_config.get('test_episodes', 2000))
+    else:
+        train_sampler = EpisodeSampler(train_dataset, n_way=n_way, k_shot=k_shot, q_query=q_query, num_episodes=fsl_config.get('train_episodes', 10000))
+        val_sampler = EpisodeSampler(val_dataset, n_way=n_way, k_shot=k_shot, q_query=q_query, num_episodes=fsl_config.get('val_episodes', 1000))
+        test_sampler = EpisodeSampler(test_dataset, n_way=n_way, k_shot=k_shot, q_query=q_query, num_episodes=fsl_config.get('test_episodes', 2000))
     
     # Wrap in simple loader
     def episode_collate(episodes):
         return episodes[0]  # Single episode per batch for simplicity
     
-    train_loader = DataLoader(
-        list(train_sampler),
-        batch_size=1,
-        shuffle=True,
-        collate_fn=episode_collate
-    )
-    
-    val_loader = DataLoader(
-        list(val_sampler),
-        batch_size=1,
-        shuffle=False,
-        collate_fn=episode_collate
-    )
-    
-    test_loader = DataLoader(
-        list(test_sampler),
-        batch_size=1,
-        shuffle=False,
-        collate_fn=episode_collate
-    )
+    # Configure DataLoader depending on whether sampler is iterable
+    num_workers = config.get('training', {}).get('num_workers', 4)
+    pin_memory = config.get('training', {}).get('pin_memory', False)
+
+    if use_iterable:
+        train_loader = DataLoader(
+            train_sampler,
+            batch_size=1,
+            shuffle=False,
+            collate_fn=episode_collate,
+            num_workers=num_workers,
+            pin_memory=pin_memory
+        )
+        val_loader = DataLoader(
+            val_sampler,
+            batch_size=1,
+            shuffle=False,
+            collate_fn=episode_collate,
+            num_workers=max(0, num_workers // 2),
+            pin_memory=pin_memory
+        )
+        test_loader = DataLoader(
+            test_sampler,
+            batch_size=1,
+            shuffle=False,
+            collate_fn=episode_collate,
+            num_workers=max(0, num_workers // 2),
+            pin_memory=pin_memory
+        )
+    else:
+        train_loader = DataLoader(
+            list(train_sampler),
+            batch_size=1,
+            shuffle=True,
+            collate_fn=episode_collate
+        )
+        val_loader = DataLoader(
+            list(val_sampler),
+            batch_size=1,
+            shuffle=False,
+            collate_fn=episode_collate
+        )
+        test_loader = DataLoader(
+            list(test_sampler),
+            batch_size=1,
+            shuffle=False,
+            collate_fn=episode_collate
+        )
     
     return train_loader, val_loader, test_loader
 
