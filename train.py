@@ -455,8 +455,12 @@ def train_epoch(
     total_queries = 0
     episode_accuracies = []
     
-    num_episodes = len(train_loader)
-    if max_episodes is not None:
+    # len(train_loader) may fail for IterableDataset-backed loaders
+    try:
+        num_episodes = len(train_loader)
+    except Exception:
+        num_episodes = None
+    if max_episodes is not None and num_episodes is not None:
         num_episodes = min(num_episodes, max_episodes)
     
     for episode_idx, (support_x, support_y, query_x, query_y) in enumerate(train_loader):
@@ -496,15 +500,19 @@ def train_epoch(
         # Log progress
         if (episode_idx + 1) % 100 == 0:
             avg_loss = total_loss / (episode_idx + 1)
-            avg_acc = total_correct / total_queries
+            avg_acc = total_correct / total_queries if total_queries > 0 else 0.0
+            total_str = str(num_episodes) if num_episodes is not None else '?'
             logger.info(
-                f"Epoch {epoch} | Episode {episode_idx + 1}/{num_episodes} | "
+                f"Epoch {epoch} | Episode {episode_idx + 1}/{total_str} | "
                 f"Loss: {avg_loss:.4f} | Acc: {avg_acc:.4f}"
             )
     
+    processed = len(episode_accuracies)
+    loss_val = total_loss / processed if processed > 0 else 0.0
+    acc_val = total_correct / total_queries if total_queries > 0 else 0.0
     return {
-        'loss': total_loss / num_episodes,
-        'accuracy': total_correct / total_queries,
+        'loss': loss_val,
+        'accuracy': acc_val,
         'episode_accuracies': episode_accuracies
     }
 
@@ -534,8 +542,11 @@ def evaluate(
     total_queries = 0
     episode_accuracies = []
     
-    num_episodes = len(eval_loader)
-    if max_episodes is not None:
+    try:
+        num_episodes = len(eval_loader)
+    except Exception:
+        num_episodes = None
+    if max_episodes is not None and num_episodes is not None:
         num_episodes = min(num_episodes, max_episodes)
     
     for episode_idx, (support_x, support_y, query_x, query_y) in enumerate(eval_loader):
@@ -550,14 +561,14 @@ def evaluate(
         
         logits = model.forward_episode(support_x, support_y, query_x)
         predictions = logits.argmax(dim=-1)
-        
+
         correct = (predictions == query_y).sum().item()
         total_correct += correct
         total_queries += query_y.size(0)
         episode_accuracies.append(correct / query_y.size(0))
     
-    accuracy = total_correct / total_queries
-    accuracy_std = np.std(episode_accuracies)
+    accuracy = total_correct / total_queries if total_queries > 0 else 0.0
+    accuracy_std = np.std(episode_accuracies) if len(episode_accuracies) > 0 else 0.0
     
     # Compute FSI
     fsi_calc = FewShotStabilityIndex()
