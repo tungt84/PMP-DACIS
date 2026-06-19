@@ -647,10 +647,13 @@ def run_pmp_training(
     stage1_prune_ratio = stage1_config.get('pruning_ratio', 0.3)
     
     # Initial training before pruning
+    # Coerce lr/weight_decay to floats (configs may contain strings)
+    _lr = float(training_config.get('lr', 1e-3) or 1e-3)
+    _wd = float(training_config.get('weight_decay', 1e-4) or 1e-4)
     optimizer = optim.Adam(
         model.parameters(),
-        lr=training_config.get('lr', 1e-3),
-        weight_decay=training_config.get('weight_decay', 1e-4)
+        lr=_lr,
+        weight_decay=_wd
     )
     
     for epoch in range(stage1_epochs):
@@ -706,10 +709,12 @@ def run_pmp_training(
     stage2_config = pmp_config.get('stage2', {})
     stage2_epochs = stage2_config.get('epochs', 50)
     
+    _outer_lr = float(stage2_config.get('outer_lr', 1e-3) or 1e-3)
+    _wd = float(training_config.get('weight_decay', 1e-4) or 1e-4)
     optimizer = optim.Adam(
         model.parameters(),
-        lr=stage2_config.get('outer_lr', 1e-3),
-        weight_decay=training_config.get('weight_decay', 1e-4)
+        lr=_outer_lr,
+        weight_decay=_wd
     )
     
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -780,10 +785,12 @@ def run_pmp_training(
     model = pruned_model.to(device)
     
     # Fine-tune after final pruning
+    _lr = float(stage3_config.get('lr', 1e-4) or 1e-4)
+    _wd = float(training_config.get('weight_decay', 1e-4) or 1e-4)
     optimizer = optim.Adam(
         model.parameters(),
-        lr=stage3_config.get('lr', 1e-4),
-        weight_decay=training_config.get('weight_decay', 1e-4)
+        lr=_lr,
+        weight_decay=_wd
     )
     
     for epoch in range(stage3_epochs):
