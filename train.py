@@ -215,168 +215,58 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
 
     logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
     try:
-        # User requested the config name exactly as 'default' (note the spelling).
-        # If that fails, try the common 'color' config as a fallback.
-        # Prefer the 'color' config which contains image fields.
-        # Some configs (like the default/text-only one) return a 'text' field
-        # pointing to image paths instead of an 'image' PIL object.
-    
-        hf = load_dataset("mohanty/PlantVillage", "color")
-        print(hf)
-        print(hf['train'][0])
-     
-        # Select splits
-        if 'train' in hf:
-            hf_train = hf['train']
-        else:
-            hf_train = hf[list(hf.keys())[0]]
+        # Load local PlantVillage using the provided local loader
+        from local_loader import load_local_dataset
 
-        if 'validation' in hf:
-            hf_val = hf['validation']
-        elif 'test' in hf:
-            hf_val = hf['test']
-        else:
-            split = hf_train.train_test_split(test_size=0.2)
-            hf_train = split['train']
-            hf_val = split['test']
+        root = dataset_config.get('root', 'data')
+        # if dataset root points to parent folder, append plantvillage subfolder
+        if dataset_config.get('name', '').lower() == 'plantvillage':
+            candidate = os.path.join(root, 'plantvillage')
+            if os.path.isdir(candidate):
+                root = candidate
+        config_name = dataset_config.get('config', 'color')
+        splits = load_local_dataset(root, config=config_name)
 
-        # Basic transforms
+        # Build class -> index mapping from train split
+        class_names = sorted({ex['label'] for ex in splits['train']})
+        class_to_idx = {name: i for i, name in enumerate(class_names)}
+        num_classes = len(class_names)
+        dataset_config['num_classes'] = num_classes
+
         image_size = dataset_config.get('image_size', 224)
-        tfm = transforms.Compose([
+
+        transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        class SimpleHFDataset(Dataset):
-            def __init__(self, hf_dataset, transform=None):
-                self.ds = hf_dataset
-                self.transform = transform or tfm
-                # Detect label field name and infer num classes
-                features = getattr(hf_dataset, 'features', {}) or {}
-                self.label_key = None
-                # Prefer schema-declared ClassLabel
-                for k, v in features.items():
-                    if isinstance(v, ClassLabel):
-                        self.label_key = k
-                        break
-
-                # If not found, probe a small sample of items to find a label-like key
-                if self.label_key is None:
-                    sample_n = min(1000, len(hf_dataset))
-                    candidates = set()
-                    for i in range(sample_n):
-                        item = hf_dataset[i]
-                        for k, v in item.items():
-                            if k == 'image':
-                                continue
-                            if isinstance(v, (int, np.integer)) or isinstance(v, str):
-                                candidates.add(k)
-                        if candidates:
-                            break
-
-                    # pick best candidate by name priority
-                    if candidates:
-                        priority = ['label', 'labels', 'class', 'classes', 'leaf', 'category', 'target']
-                        chosen = None
-                        for p in priority:
-                            for c in candidates:
-                                if p in c.lower():
-                                    chosen = c
-                                    break
-                            if chosen:
-                                break
-                        self.label_key = chosen or sorted(candidates)[0]
-
-                # Fallback
-                if self.label_key is None:
-                    self.label_key = 'label'
-
-                # infer num_classes if possible
-                lf = features.get(self.label_key, None)
-                if isinstance(lf, ClassLabel):
-                    self.num_classes = lf.num_classes
-                else:
-                    # gather unique labels from a small sample
-                    sample_n = min(1000, len(hf_dataset))
-                    labs = []
-                    for i in range(sample_n):
-                        item = hf_dataset[i]
-                        if self.label_key in item:
-                            labs.append(item[self.label_key])
-                    if len(labs) == 0:
-                        self.num_classes = dataset_config.get('num_classes', 38)
-                    else:
-                        uniq = sorted(list({l for l in labs}))
-                        if isinstance(uniq[0], int):
-                            self.num_classes = int(max(uniq) + 1)
-                        else:
-                            self.label_map = {v: i for i, v in enumerate(uniq)}
-                            self.num_classes = len(uniq)
+        class LocalPVDataset(Dataset):
+            def __init__(self, examples, class_to_idx, transform=None):
+                self.examples = examples
+                self.class_to_idx = class_to_idx
+                self.transform = transform
 
             def __len__(self):
-                return len(self.ds)
+                return len(self.examples)
 
             def __getitem__(self, idx):
-                item = self.ds[idx]
-                # Expect 'image' and label under detected key
-                img = item.get('image', None)
-                if img is None:
-                    # try to find an image-like field or a text path
-                    for k, v in item.items():
-                        if k == self.label_key:
-                            continue
-                        # direct image bytes/arrays or PIL Image
-                        if isinstance(v, (bytes, bytearray)) or isinstance(v, np.ndarray) or getattr(v, 'mode', None) is not None:
-                            img = v
-                            break
-                        # some HF configs store a path under 'text'
-                        if isinstance(v, str) and v.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff')):
-                            img = v
-                            break
+                ex = self.examples[idx]
+                img_path = ex['abs_path']
+                try:
+                    img = Image.open(img_path).convert('RGB')
+                except Exception:
+                    # If image cannot be opened, return a random tensor
+                    img = Image.new('RGB', (image_size, image_size))
+                if self.transform:
+                    img = self.transform(img)
+                label_name = ex['label']
+                label = self.class_to_idx.get(label_name, 0)
+                return img, label
 
-                if isinstance(img, bytes):
-                    image = Image.open(io.BytesIO(img)).convert('RGB')
-                elif isinstance(img, np.ndarray):
-                    image = Image.fromarray(img).convert('RGB')
-                elif isinstance(img, Image.Image):
-                    image = img.convert('RGB')
-                elif isinstance(img, str):
-                    # img may be a path (absolute or relative). Try to open directly.
-                    try:
-                        image = Image.open(img).convert('RGB')
-                    except Exception:
-                        # If opening fails, raise to let caller know
-                        raise
-                else:
-                    raise KeyError('no image field found in dataset item')
-
-                image = self.transform(image)
-
-                # Resolve label via detected key
-                label = item.get(self.label_key)
-                if label is None:
-                    # attempt to find any non-image field that looks like a label
-                    for k, v in item.items():
-                        if k == 'image':
-                            continue
-                        if isinstance(v, (int, np.integer)) or isinstance(v, str):
-                            label = v
-                            break
-
-                if hasattr(self, 'label_map') and isinstance(label, str):
-                    label = self.label_map[label]
-                elif isinstance(label, ClassLabel):
-                    label = int(label)
-
-                return image, int(label)
-
-        train_dataset = SimpleHFDataset(hf_train, transform=tfm)
-        val_dataset = SimpleHFDataset(hf_val, transform=tfm)
-        # For test use validation split if present
-        test_dataset = val_dataset
-
-        # Update config num_classes
-        dataset_config['num_classes'] = getattr(train_dataset, 'num_classes', dataset_config.get('num_classes', 38))
+        train_dataset = LocalPVDataset(splits['train'], class_to_idx, transform=transform)
+        val_dataset = LocalPVDataset(splits['test'], class_to_idx, transform=transform)
+        test_dataset = LocalPVDataset(splits['test'], class_to_idx, transform=transform)
 
     except Exception as e:
         logging.warning(f"HF dataset load failed: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
