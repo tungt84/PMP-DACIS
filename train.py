@@ -464,10 +464,11 @@ def train_epoch(
             break
         
         # Move to device
-        support_x = support_x.to(device)
-        support_y = support_y.to(device)
-        query_x = query_x.to(device)
-        query_y = query_y.to(device)
+        non_block = config.get('training', {}).get('pin_memory', False) and device.startswith('cuda')
+        support_x = support_x.to(device, non_blocking=non_block)
+        support_y = support_y.to(device, non_blocking=non_block)
+        query_x = query_x.to(device, non_blocking=non_block)
+        query_y = query_y.to(device, non_blocking=non_block)
         
         # Forward pass
         optimizer.zero_grad()
@@ -541,10 +542,11 @@ def evaluate(
         if max_episodes is not None and episode_idx >= max_episodes:
             break
         
-        support_x = support_x.to(device)
-        support_y = support_y.to(device)
-        query_x = query_x.to(device)
-        query_y = query_y.to(device)
+        non_block = config.get('training', {}).get('pin_memory', False) and device.startswith('cuda') if 'config' in globals() else False
+        support_x = support_x.to(device, non_blocking=non_block)
+        support_y = support_y.to(device, non_blocking=non_block)
+        query_x = query_x.to(device, non_blocking=non_block)
+        query_y = query_y.to(device, non_blocking=non_block)
         
         logits = model.forward_episode(support_x, support_y, query_x)
         predictions = logits.argmax(dim=-1)
