@@ -114,8 +114,14 @@ class EpisodeSampler:
         self.class_indices = defaultdict(list)
         for idx, (_, label) in enumerate(dataset):
             self.class_indices[label].append(idx)
-        
-        self.classes = list(self.class_indices.keys())
+        # Filter classes that have at least k_shot + q_query samples
+        min_samples = self.k_shot + self.q_query
+        self.classes = [c for c, idxs in self.class_indices.items() if len(idxs) >= min_samples]
+        if len(self.classes) < self.n_way:
+            raise ValueError(
+                f"Not enough classes with >= {min_samples} samples for {self.n_way}-way episodes. "
+                f"Found {len(self.classes)} classes."
+            )
     
     def __len__(self):
         return self.num_episodes
@@ -330,7 +336,13 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
                         _, lbl = dataset[idx]
                         self.class_indices[lbl].append(idx)
 
-                self.classes = list(self.class_indices.keys())
+                # Filter classes that have at least k_shot + q_query samples
+                min_samples = self.k_shot + self.q_query
+                self.classes = [c for c, idxs in self.class_indices.items() if len(idxs) >= min_samples]
+                if len(self.classes) < self.n_way:
+                    raise ValueError(
+                        f"Not enough classes with >= {min_samples} samples for {self.n_way}-way episodes. Found {len(self.classes)}."
+                    )
 
             def __iter__(self):
                 rng = random.Random()
