@@ -65,47 +65,92 @@ class DeploymentEfficiencyScore:
         input_size: Tuple[int, ...] = (1, 3, 224, 224),
         num_runs: int = 100,
         warmup: int = 10,
-        device: str = 'cpu'
+        device: str = 'cpu',
+        n_way: int = 5,
+        k_shot: int = 5,
+        q_query: int = 15,
     ) -> float:
-        """
-        Measure inference FPS.
-        
+        """Measure inference FPS for a meta‑few‑shot model.
+
+        The PMPFramework (and similar meta‑learning models) expects a
+        *support* set, a *query* set and the corresponding *support labels*
+        as inputs to ``forward``.  The original implementation used a single
+        dummy image tensor, which caused a ``TypeError`` because the required
+        arguments were missing.  This version creates a dummy *episode*
+        matching the signature ``forward(support_images, query_images,
+        support_labels, mode='proto')``.
+
         Args:
-            model: Model to benchmark
-            input_size: Input tensor shape
-            num_runs: Number of inference runs
-            warmup: Warmup iterations
-            device: Device to run on
-            
+            model: Model to benchmark.
+            input_size: Shape of a single image tensor ``(C, H, W)`` – the
+                batch dimension is derived from ``n_way``, ``k_shot`` and
+                ``q_query``.
+            num_runs: Number of inference runs for timing.
+            warmup: Warm‑up iterations to stabilize GPU kernels.
+            device: Device identifier (e.g., ``'cpu'`` or ``'cuda'``).
+            n_way: Number of classes per episode.
+            k_shot: Number of support samples per class.
+            q_query: Number of query samples per class.
+
         Returns:
-            Frames per second
+            Frames per second (FPS) measured as the number of *query* images
+            processed per second.
         """
         model = model.to(device)
         model.eval()
-        
-        dummy_input = torch.randn(*input_size).to(device)
-        
-        # Warmup
+
+        # ------------------------------------------------------------------
+        # 1️⃣ Build dummy episode (support, query, labels)
+        # ------------------------------------------------------------------
+        # ``input_size`` is expected to be ``(B, C, H, W)`` where B is 1.
+        # We extract the channel and spatial dimensions.
+        _, C, H, W = input_size
+
+        # Support set: (n_way * k_shot, C, H, W)
+        support_images = torch.randn(
+            n_way * k_shot, C, H, W, device=device
+        )
+        # Query set: (n_way * q_query, C, H, W)
+        query_images = torch.randn(
+            n_way * q_query, C, H, W, device=device
+        )
+        # Support labels: repeated class indices for each support sample
+        support_labels = torch.arange(n_way, device=device).repeat_interleave(k_shot)
+
+        # ------------------------------------------------------------------
+        # 2️⃣ Warm‑up runs (GPU kernels need a few iterations to stabilise)
+        # ------------------------------------------------------------------
         with torch.no_grad():
             for _ in range(warmup):
-                _ = model(dummy_input)
-        
-        # Synchronize if on GPU
+                _ = model(
+                    support_images,
+                    query_images,
+                    support_labels,
+                    mode='proto'
+                )
+
+        # Synchronize if on GPU before timing
         if device == 'cuda':
             torch.cuda.synchronize()
-        
-        # Benchmark
+
+        # ------------------------------------------------------------------
+        # 3️⃣ Benchmark
+        # ------------------------------------------------------------------
         start_time = time.time()
         with torch.no_grad():
             for _ in range(num_runs):
-                _ = model(dummy_input)
-        
+                _ = model(
+                    support_images,
+                    query_images,
+                    support_labels,
+                    mode='proto'
+                )
         if device == 'cuda':
             torch.cuda.synchronize()
-        
+
         total_time = time.time() - start_time
-        fps = num_runs / total_time
-        
+        # FPS is measured in terms of *query* images processed per second.
+        fps = (num_runs * n_way * q_query) / total_time
         return fps
     
     def estimate_energy(
