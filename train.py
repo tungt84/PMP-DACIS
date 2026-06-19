@@ -213,7 +213,7 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
     import io
     import numpy as np
 
-    logging.info("Loading PlantVillage dataset from HuggingFace Datasets...")
+    logging.info("Loading PlantVillage dataset from local Datasets...")
     try:
         # Load local PlantVillage using the provided local loader
         from local_loader import load_local_dataset
@@ -264,12 +264,35 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, DataLoader
                 label = self.class_to_idx.get(label_name, 0)
                 return img, label
 
-        train_dataset = LocalPVDataset(splits['train'], class_to_idx, transform=transform)
-        val_dataset = LocalPVDataset(splits['test'], class_to_idx, transform=transform)
-        test_dataset = LocalPVDataset(splits['test'], class_to_idx, transform=transform)
+        train_examples = list(splits['train'])
+        test_examples = list(splits['test'])
 
+        # Group train examples by leaf_id then split leaf_ids for val (10%)
+        groups = defaultdict(list)
+        for ex in train_examples:
+            groups[ex['leaf_id']].append(ex)
+
+        leaf_ids = list(groups.keys())
+        import random
+        random.Random(42).shuffle(leaf_ids)
+        val_frac = 0.1
+        val_count = int(len(leaf_ids) * val_frac)
+        val_leaf_ids = set(leaf_ids[:val_count])
+        new_train = []
+        val = []
+        for lid, exs in groups.items():
+            if lid in val_leaf_ids:
+                val.extend(exs)
+            else:
+                new_train.extend(exs)
+
+        train_dataset = LocalPVDataset(new_train, class_to_idx, transform=transform)
+        val_dataset = LocalPVDataset(val, class_to_idx, transform=transform)
+        test_dataset = LocalPVDataset(test_examples, class_to_idx, transform=transform)
+        logging.info(f"Loaded datasets — train: {len(new_train)}, val: {len(val)}, test: {len(test_examples)}")
+        
     except Exception as e:
-        logging.warning(f"HF dataset load failed: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
+        logging.warning(f"local dataset load failed: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}")
         logging.warning("Falling back to dummy datasets")
         num_classes = dataset_config.get('num_classes', 38)
         train_dataset = DummyDataset(num_classes=num_classes, samples_per_class=100)
