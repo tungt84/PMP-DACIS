@@ -431,6 +431,7 @@ def train_epoch(
     device: str,
     epoch: int,
     logger: logging.Logger,
+    config: Optional[Dict] = None,
     max_episodes: Optional[int] = None
 ) -> Dict[str, float]:
     """
@@ -468,7 +469,9 @@ def train_epoch(
             break
         
         # Move to device
-        non_block = config.get('training', {}).get('pin_memory', False) and device.startswith('cuda')
+        non_block = False
+        if config is not None:
+            non_block = config.get('training', {}).get('pin_memory', False) and str(device).startswith('cuda')
         support_x = support_x.to(device, non_blocking=non_block)
         support_y = support_y.to(device, non_blocking=non_block)
         query_x = query_x.to(device, non_blocking=non_block)
@@ -522,6 +525,7 @@ def evaluate(
     model: PMPFramework,
     eval_loader: DataLoader,
     device: str,
+    config: Optional[Dict] = None,
     max_episodes: Optional[int] = None
 ) -> Dict[str, float]:
     """
@@ -553,7 +557,9 @@ def evaluate(
         if max_episodes is not None and episode_idx >= max_episodes:
             break
         
-        non_block = config.get('training', {}).get('pin_memory', False) and device.startswith('cuda') if 'config' in globals() else False
+        non_block = False
+        if config is not None:
+            non_block = config.get('training', {}).get('pin_memory', False) and str(device).startswith('cuda')
         support_x = support_x.to(device, non_blocking=non_block)
         support_y = support_y.to(device, non_blocking=non_block)
         query_x = query_x.to(device, non_blocking=non_block)
@@ -670,6 +676,7 @@ def run_pmp_training(
     for epoch in range(stage1_epochs):
         train_metrics = train_epoch(
             model, train_loader, optimizer, device, epoch, logger,
+            config=config,
             max_episodes=training_config.get('episodes_per_epoch', 500)
         )
         
@@ -678,7 +685,7 @@ def run_pmp_training(
             writer.add_scalar('Stage1/train_acc', train_metrics['accuracy'], epoch)
     
     # Evaluate before pruning
-    pre_prune_metrics = evaluate(model, val_loader, device, max_episodes=200)
+    pre_prune_metrics = evaluate(model, val_loader, device, config=config, max_episodes=200)
     csg_tracker.record_stage_accuracy(pre_prune_metrics['accuracy'], 'pre_prune')
     logger.info(f"Pre-prune accuracy: {pre_prune_metrics['accuracy']:.4f}")
     
@@ -740,6 +747,7 @@ def run_pmp_training(
     for epoch in range(stage2_epochs):
         train_metrics = train_epoch(
             model, train_loader, optimizer, device, epoch, logger,
+            config=config,
             max_episodes=training_config.get('episodes_per_epoch', 500)
         )
         
@@ -747,7 +755,7 @@ def run_pmp_training(
         
         # Validate
         if (epoch + 1) % 5 == 0:
-            val_metrics = evaluate(model, val_loader, device, max_episodes=200)
+            val_metrics = evaluate(model, val_loader, device, config=config, max_episodes=200)
             logger.info(
                 f"Epoch {epoch + 1} | Val Acc: {val_metrics['accuracy']:.4f} | "
                 f"FSI: {val_metrics['fsi']:.4f}"
@@ -770,7 +778,7 @@ def run_pmp_training(
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
     
-    stage2_metrics = evaluate(model, val_loader, device, max_episodes=200)
+    stage2_metrics = evaluate(model, val_loader, device, config=config, max_episodes=200)
     csg_tracker.record_stage_accuracy(stage2_metrics['accuracy'], 'stage2')
     logger.info(f"Stage 2 best accuracy: {stage2_metrics['accuracy']:.4f}")
     
@@ -807,6 +815,7 @@ def run_pmp_training(
     for epoch in range(stage3_epochs):
         train_metrics = train_epoch(
             model, train_loader, optimizer, device, epoch, logger,
+            config=config,
             max_episodes=training_config.get('episodes_per_epoch', 300)
         )
         
@@ -815,7 +824,7 @@ def run_pmp_training(
             writer.add_scalar('Stage3/train_acc', train_metrics['accuracy'], epoch)
     
     # Final evaluation
-    stage3_metrics = evaluate(model, val_loader, device, max_episodes=200)
+    stage3_metrics = evaluate(model, val_loader, device, config=config, max_episodes=200)
     csg_tracker.record_stage_accuracy(stage3_metrics['accuracy'], 'stage3')
     
     # ================================================================
