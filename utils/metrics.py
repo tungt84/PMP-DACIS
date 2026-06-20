@@ -183,41 +183,42 @@ class DeploymentEfficiencyScore:
         model: nn.Module,
         input_size: Tuple[int, ...]
     ) -> int:
-        """Estimate FLOPs for the model."""
+        """Estimate FLOPs for the model using a dummy episode."""
         total_flops = 0
-        
+
         def hook_fn(module, input, output):
             nonlocal total_flops
-            
             if isinstance(module, nn.Conv2d):
                 batch_size = input[0].shape[0]
                 output_dims = output.shape[2:]
-                
                 kernel_ops = module.kernel_size[0] * module.kernel_size[1]
                 in_channels = module.in_channels // module.groups
                 out_channels = module.out_channels
-                
                 flops = batch_size * np.prod(output_dims) * kernel_ops * in_channels * out_channels
                 total_flops += flops
-                
             elif isinstance(module, nn.Linear):
                 batch_size = input[0].shape[0]
                 flops = batch_size * module.in_features * module.out_features
                 total_flops += flops
-        
+
         hooks = []
         for module in model.modules():
             if isinstance(module, (nn.Conv2d, nn.Linear)):
                 hooks.append(module.register_forward_hook(hook_fn))
-        
+
+        # Build dummy episode matching compute_fps signature
+        _, C, H, W = input_size
+        n_way, k_shot, q_query = 5, 5, 15
+        support_images = torch.randn(n_way * k_shot, C, H, W)
+        query_images = torch.randn(n_way * q_query, C, H, W)
+        support_labels = torch.arange(n_way).repeat_interleave(k_shot)
+
         model.eval()
-        dummy_input = torch.randn(*input_size)
         with torch.no_grad():
-            _ = model(dummy_input)
-        
+            _ = model(support_images, query_images, support_labels, mode="proto")
+
         for hook in hooks:
             hook.remove()
-        
         return int(total_flops)
     
     def count_parameters(self, model: nn.Module) -> int:
