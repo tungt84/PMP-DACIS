@@ -156,7 +156,8 @@ class DeploymentEfficiencyScore:
     def estimate_energy(
         self,
         model: nn.Module,
-        input_size: Tuple[int, ...] = (1, 3, 224, 224)
+        input_size: Tuple[int, ...] = (1, 3, 224, 224),
+        device: str | torch.device | None = None
     ) -> float:
         """
         Estimate energy consumption per inference.
@@ -168,7 +169,14 @@ class DeploymentEfficiencyScore:
         Returns:
             Estimated energy in Joules
         """
-        flops = self._estimate_flops(model, input_size)
+        # Determine the device that the model resides on if not provided
+        if device is None:
+            try:
+                device = next(model.parameters()).device
+            except StopIteration:
+                device = torch.device('cpu')
+
+        flops = self._estimate_flops(model, input_size, device=device)
         gflops = flops / 1e9
         
         energy_coefficient = self.energy_coefficients.get(
@@ -181,7 +189,8 @@ class DeploymentEfficiencyScore:
     def _estimate_flops(
         self,
         model: nn.Module,
-        input_size: Tuple[int, ...]
+        input_size: Tuple[int, ...],
+        device: str | torch.device = 'cpu'
     ) -> int:
         """Estimate FLOPs for the model using a dummy episode."""
         total_flops = 0
@@ -209,9 +218,9 @@ class DeploymentEfficiencyScore:
         # Build dummy episode matching compute_fps signature
         _, C, H, W = input_size
         n_way, k_shot, q_query = 5, 5, 15
-        support_images = torch.randn(n_way * k_shot, C, H, W)
-        query_images = torch.randn(n_way * q_query, C, H, W)
-        support_labels = torch.arange(n_way).repeat_interleave(k_shot)
+        support_images = torch.randn(n_way * k_shot, C, H, W, device=device)
+        query_images = torch.randn(n_way * q_query, C, H, W, device=device)
+        support_labels = torch.arange(n_way, device=device).repeat_interleave(k_shot)
 
         model.eval()
         with torch.no_grad():
