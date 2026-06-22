@@ -855,8 +855,15 @@ def run_pmp_training(
     sparsity_stats = compute_sparsity(model)
     
     # Compute DES
+    # Pass the few‑shot episode configuration (n_way, k_shot, n_query) so that
+    # DES benchmarking uses the same episode dimensions as training/evaluation.
+    # Pass explicit episode parameters instead of a dict
+    fsl_cfg = config.get('evaluation', {})
     des_calc = DeploymentEfficiencyScore(
-        hardware_profile=config.get('hardware', {}).get('target', 'raspberry_pi_4')
+        hardware_profile=config.get('hardware', {}).get('target', 'raspberry_pi_4'),
+        n_way=fsl_cfg.get('n_way'),
+        k_shot=fsl_cfg.get('k_shot'),
+        q_query=fsl_cfg.get('n_query')
     )
     des_results = des_calc.compute(model, stage3_metrics['accuracy'], device=device)
     

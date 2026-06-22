@@ -304,7 +304,10 @@ def evaluate_efficiency(
     model: nn.Module,
     device: str,
     hardware_profile: str = 'raspberry_pi_4',
-    accuracy: float = 0.0
+    accuracy: float = 0.0,
+    n_way: int | None = None,
+    k_shot: int | None = None,
+    q_query: int | None = None,
 ) -> Dict[str, any]:
     """
     Evaluate model efficiency metrics.
@@ -332,7 +335,16 @@ def evaluate_efficiency(
     flops_stats = compute_flops(model, input_size=(1, 3, 224, 224))
     
     # Compute DES
-    des_calc = DeploymentEfficiencyScore(hardware_profile=hardware_profile)
+    # Instantiate DES calculator with explicit episode parameters if provided
+    if any(v is not None for v in (n_way, k_shot, q_query)):
+        des_calc = DeploymentEfficiencyScore(
+            hardware_profile=hardware_profile,
+            n_way=n_way,
+            k_shot=k_shot,
+            q_query=q_query
+        )
+    else:
+        des_calc = DeploymentEfficiencyScore(hardware_profile=hardware_profile)
     des_results = des_calc.compute(model, accuracy, device=device)
     
     results = {
@@ -561,6 +573,14 @@ def main():
     # Load model
     model, config = load_model(args.checkpoint, device)
     logger.info(f"Model loaded successfully")
+
+    # Apply CLI overrides into config (similar behavior to train.py)
+    if args.n_way:
+        config.setdefault('evaluation', {})['n_way'] = args.n_way
+    # Determine main_k_shot from CLI shots list (match existing behavior)
+    main_k_shot = args.shots[1] if len(args.shots) > 1 else args.shots[0]
+    if args.shots:
+        config.setdefault('evaluation', {})['k_shot'] = main_k_shot
     
     # Create test dataset
     logger.info("Creating test dataset...")
@@ -573,11 +593,12 @@ def main():
     
     # Main evaluation
     logger.info(f"\nRunning main evaluation ({args.episodes} episodes)...")
+    fsl_cfg = config.get('evaluation', {})
     main_sampler = EpisodeSampler(
         test_dataset,
-        n_way=args.n_way,
-        k_shot=args.shots[1] if len(args.shots) > 1 else args.shots[0],
-        q_query=15,
+        n_way=fsl_cfg.get('n_way', args.n_way),
+        k_shot=fsl_cfg.get('k_shot', args.shots[1] if len(args.shots) > 1 else args.shots[0]),
+        q_query=fsl_cfg.get('n_query', 15),
         num_episodes=args.episodes,
         seed=args.seed
     )
@@ -605,10 +626,15 @@ def main():
     
     # Efficiency evaluation
     logger.info(f"\nEvaluating efficiency metrics...")
+    # Efficiency evaluation: pass episode params from config (overrides applied above)
+    fsl_cfg = config.get('evaluation', {})
     efficiency_results = evaluate_efficiency(
         model, device,
         hardware_profile=args.hardware,
-        accuracy=fewshot_results['accuracy']['mean']
+        accuracy=fewshot_results['accuracy']['mean'],
+        n_way=fsl_cfg.get('n_way', args.n_way),
+        k_shot=fsl_cfg.get('k_shot', args.shots[1] if len(args.shots) > 1 else args.shots[0]),
+        q_query=fsl_cfg.get('n_query', 15)
     )
     
     logger.info(f"Parameters: {efficiency_results['parameters']['total']:,}")

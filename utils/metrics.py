@@ -30,17 +30,35 @@ class DeploymentEfficiencyScore:
     def __init__(
         self,
         hardware_profile: str = 'raspberry_pi_4',
-        normalize: bool = True
+        normalize: bool = True,
+        n_way: int | None = None,
+        k_shot: int | None = None,
+        q_query: int | None = None,
     ):
-        """
-        Initialize DES calculator.
-        
+        """Initialize DES calculator.
+
         Args:
-            hardware_profile: Target hardware for energy estimation
-            normalize: Whether to normalize the score
+            hardware_profile: Target hardware for energy estimation.
+            normalize: Whether to normalize the score.
+            n_way: Number of classes per episode (optional).
+            k_shot: Number of support samples per class (optional).
+            q_query: Number of query samples per class (optional).
+                If any of these are ``None`` the default values (5, 5, 15)
+                are used.
         """
         self.hardware_profile = hardware_profile
         self.normalize = normalize
+        # Default episode parameters (match original hard‑coded defaults)
+        self.n_way: int = 5
+        self.k_shot: int = 5
+        self.q_query: int = 15
+        # Override defaults if explicit values are provided
+        if n_way is not None:
+            self.n_way = n_way
+        if k_shot is not None:
+            self.k_shot = k_shot
+        if q_query is not None:
+            self.q_query = q_query
         
         # Energy coefficients (Joules per GFLOP) for different hardware
         self.energy_coefficients = {
@@ -66,9 +84,9 @@ class DeploymentEfficiencyScore:
         num_runs: int = 100,
         warmup: int = 10,
         device: str = 'cpu',
-        n_way: int = 5,
-        k_shot: int = 5,
-        q_query: int = 15,
+        n_way: int | None = None,
+        k_shot: int | None = None,
+        q_query: int | None = None,
     ) -> float:
         """Measure inference FPS for a meta‑few‑shot model.
 
@@ -104,6 +122,11 @@ class DeploymentEfficiencyScore:
         # ------------------------------------------------------------------
         # ``input_size`` is expected to be ``(B, C, H, W)`` where B is 1.
         # We extract the channel and spatial dimensions.
+        # Resolve episode parameters – fall back to instance defaults if None
+        n_way = n_way if n_way is not None else self.n_way
+        k_shot = k_shot if k_shot is not None else self.k_shot
+        q_query = q_query if q_query is not None else self.q_query
+
         _, C, H, W = input_size
 
         # Support set: (n_way * k_shot, C, H, W)
@@ -192,7 +215,12 @@ class DeploymentEfficiencyScore:
         input_size: Tuple[int, ...],
         device: str | torch.device = 'cpu'
     ) -> int:
-        """Estimate FLOPs for the model using a dummy episode."""
+        """Estimate FLOPs for the model using a dummy episode.
+
+        The episode dimensions (n_way, k_shot, q_query) are taken from the
+        instance attributes ``self.n_way``, ``self.k_shot`` and ``self.q_query``
+        unless they have been overridden via the ``compute_fps`` call.
+        """
         total_flops = 0
 
         def hook_fn(module, input, output):
@@ -215,9 +243,11 @@ class DeploymentEfficiencyScore:
             if isinstance(module, (nn.Conv2d, nn.Linear)):
                 hooks.append(module.register_forward_hook(hook_fn))
 
-        # Build dummy episode matching compute_fps signature
+        # Build dummy episode using the stored defaults
         _, C, H, W = input_size
-        n_way, k_shot, q_query = 5, 5, 15
+        n_way = getattr(self, 'n_way', 5)
+        k_shot = getattr(self, 'k_shot', 5)
+        q_query = getattr(self, 'q_query', 15)
         support_images = torch.randn(n_way * k_shot, C, H, W, device=device)
         query_images = torch.randn(n_way * q_query, C, H, W, device=device)
         support_labels = torch.arange(n_way, device=device).repeat_interleave(k_shot)
